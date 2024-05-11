@@ -1,0 +1,19 @@
+{
+    "name": "mangospot/network-manager",
+    "description": "MangoSpot simple library Network Manager",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "NetworkManager\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "MangoSpot",
+            "email": "mangospot.net@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    }
+}
