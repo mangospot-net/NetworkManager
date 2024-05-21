@@ -20,6 +20,18 @@ use Exception;
 class Interfaces
 {
     /**
+     * @var bool|string
+     */
+    private $ssh = false;
+    /**
+     * @var bool|string
+     */
+    private $sftp = false;
+    /**
+     * @var bool|string
+     */
+    private $source = false;
+    /**
      * @var Adaptor[]
      */
     public $Adaptors = [];
@@ -39,7 +51,10 @@ class Interfaces
      * @var bool
      */
     private $_interfaceParsed = false;
-
+    /**
+     * @var string
+     */
+    private $_interfaceSource = '/etc/network/interfaces.d/*';
     /**
      * NetworkManager constructor.
      * @param string $InterfacePath Path to interface file, usually /etc/network/interfaces
@@ -53,14 +68,66 @@ class Interfaces
             $this->_interfaceParsed = true;
             return;
         }
-        if (!@file_exists($this->_interfaceFile))
-            throw new Exception("Interface file does not exist");
-        if (!@is_readable($this->_interfaceFile))
-            throw new Exception("Interface file is not readable");
-        $this->_interfaceContent = file_get_contents($this->_interfaceFile);
-        $this->_interfaceLoaded = true;
+        
+    }
+    
+    /**
+     * Remote connetion with SSH and SFTP
+     * @throws Exception
+     */
+    public function ssh($ssh = false)
+    {
+        if($ssh){
+		    $this->ssh = $ssh;
+            $this->sftp = $this->ssh->sftp();
+            return true;
+        } else {
+            return false;
+        }
     }
 
+    /**
+     * Check file network interfaces
+     */
+    private function pathFile()
+    {
+        if($this->sftp){
+            if (!$this->sftp->file_exists($this->_interfaceFile)){
+                throw new Exception("Interface file does not exist");
+            }
+            if (!$this->sftp->is_readable($this->_interfaceFile)){
+                throw new Exception("Interface file is not readable");
+            }
+            $this->_interfaceContent = $this->sftp->get($this->_interfaceFile);
+            $this->_interfaceLoaded = true;
+        } else {
+            if (!file_exists($this->_interfaceFile)){
+                throw new Exception("Interface file does not exist");
+            }
+            if (!is_readable($this->_interfaceFile)){
+                throw new Exception("Interface file is not readable");
+            }
+            $this->_interfaceContent = file_get_contents($this->_interfaceFile);
+            $this->_interfaceLoaded = true;
+        }
+    }
+
+    /**
+     * Add source path 
+     * @return bolean or string (/etc/network/interfaces.d/*)
+     * @throws Exception
+     */
+    public function addSource($sources = true)
+    {
+        if(is_bool($sources)){
+            return $this->source = $sources == true ? $this->_interfaceSource : false;
+        } else if(isset($sources) && !empty($sources)){
+            return $this->source = $sources;
+        } else {
+            return false;
+        }
+    }
+    
     /**
      * read interface file and fill Adaptor property
      * @return array
@@ -68,8 +135,10 @@ class Interfaces
      */
     public function parse()
     {
-        if (!$this->_interfaceLoaded)
+        $this->pathFile();
+        if (!$this->_interfaceLoaded){
             throw new Exception("Interface file is not loaded");
+        }
         $interfaceContent = explode("\n", $this->_interfaceContent);
         $lastAdaptor = '';
         foreach ($interfaceContent as $item) {
@@ -157,10 +226,9 @@ class Interfaces
         $adaptor = &$this->Adaptors[$lastAdaptor];
         switch ($chunks[0]) {
             case 'address':
-                if(strpos($chunks[1], '/') == false)
+                if(strpos($chunks[1], '/') == false){
                     $adaptor->address = $chunks[1];
-                else
-                {
+                } else {
                     $chunks[1] =  $this->_parseCidr($chunks[1]);
                     $adaptor->address = $chunks[1]["address"];
                     $adaptor->netmask = $chunks[1]["netmask"];
@@ -186,16 +254,73 @@ class Interfaces
         }
     }
 
-    function _parseCidr($cidr) {
+    /**
+     * Netmask list
+     * @param $data
+     */
+    function _Netmask($data = null)
+    {
+        $array = array(
+            0 => "0.0.0.0",
+            1 => "128.0.0.0",
+            2 => "192.0.0.0",
+            3 => "224.0.0.0",
+            4 => "240.0.0.0",
+            5 => "248.0.0.0",
+            6 => "252.0.0.0",
+            7 => "254.0.0.0",
+            8 => "255.0.0.0",
+            9 => "255.128.0.0",
+            10 => "255.192.0.0",
+            11 => "255.224.0.0",
+            12 => "255.240.0.0",
+            13 => "255.248.0.0",
+            14 => "255.252.0.0",
+            15 => "255.254.0.0",
+            16 => "255.255.0.0",
+            17 => "255.255.128.0",
+            18 => "255.255.192.0",
+            19 => "255.255.224.0",
+            20 => "255.255.240.0",
+            21 => "255.255.248.0",
+            22 => "255.255.252.0",
+            23 => "255.255.254.0",
+            24 => "255.255.255.0",
+            25 => "255.255.255.128",
+            26 => "255.255.255.192",
+            27 => "255.255.255.224",
+            28 => "255.255.255.240",
+            29 => "255.255.255.248",
+            30 => "255.255.255.252",
+            31 => "255.255.255.254",
+            32 => "255.255.255.255"
+        );
+        if (array_key_exists($data, $array)) {
+            return intval($data);
+        } else if(array_search($data, $array)){
+            return intval(array_search($data, $array));
+        } else {
+            return $array;
+        }
+    }
+
+    /**
+    * @param $cidr
+    */
+    function _parseCidr($cidr)
+    {
         $range = array();
         $cidr = explode('/', $cidr);
         $range["address"] = $cidr[0];
-        $range["network"] = long2ip((ip2long($cidr[0])) & ((-1 << (32 - (int)$cidr[1]))));
-        $range["broadcast"] = long2ip((ip2long($range["network"])) + pow(2, (32 - (int)$cidr[1])) - 1);
-        $range["netmask"] = long2ip(-1 << (32 - (int)$cidr[1]));
+        $range["network"] = long2ip((ip2long($cidr[0])) & ((-1 << (32 - $this->_Netmask($cidr[1])))));
+        $range["broadcast"] = long2ip((ip2long($range["network"])) + pow(2, (32 - $this->_Netmask($cidr[1]))) - 1);
+        $range["netmask"] = long2ip(-1 << (32 - $this->_Netmask($cidr[1])));
         return $range;
     }
 
+    public function getNetmask(){
+        return $this->_Netmask();
+    }
     /**
      * brings up an interface
      * @param string $name Interface name
@@ -209,8 +334,11 @@ class Interfaces
         if (!array_key_exists($name, $this->Adaptors))
             throw new Exception("$name does not exist is adaptor list");
         $cmd = ($sudo ? 'sudo ' : '') . "ifup $name";
-        shell_exec($cmd);
-
+        if($this->ssh){
+            $this->ssh->exec($cmd);
+        } else {
+            shell_exec($cmd);
+        }
     }
 
     /**
@@ -226,7 +354,11 @@ class Interfaces
         if (!array_key_exists($name, $this->Adaptors))
             throw new Exception("$name does not exist is adaptor list");
         $cmd = ($sudo ? 'sudo ' : '') . "ifdown $name";
-        shell_exec($cmd);
+        if($this->ssh){
+            $this->ssh->exec($cmd);
+        } else {
+            shell_exec($cmd);
+        }
     }
 
     /**
@@ -242,7 +374,11 @@ class Interfaces
         if (!array_key_exists($name, $this->Adaptors))
             throw new Exception("$name does not exist is adaptor list");
         $cmd = ($sudo ? 'sudo ' : '') . "ifdown $name && " . ($sudo ? ' sudo ' : '') . "ifup $name";
-        shell_exec($cmd);
+        if($this->ssh){
+            $this->ssh->exec($cmd);
+        } else {
+            shell_exec($cmd);
+        }
     }
 
     /**
@@ -253,16 +389,27 @@ class Interfaces
      */
     public function write($return = False)
     {
-        if (!$this->_interfaceParsed)
+        if (!$this->_interfaceParsed){
             throw new Exception("Interface file is not parsed");
-        if (!@is_writable($this->_interfaceFile) && !$return)
+        }
+        if ($this->sftp){
+            if(!$this->sftp->is_writeable($this->_interfaceFile) && !$return){
+                throw new Exception("Interface file is not writable");
+            }
+        } else if (!@is_writable($this->_interfaceFile) && !$return){
             throw new Exception("Interface file is not writable");
+        }
+
         $knownAddresses = ['address', 'netmask', 'gateway', 'broadcast', 'network'];
 
         $buffer = [];
-        $buffer[] = "#This file is generated by mangospot/NetworkManager library";
+        $buffer[] = "#This file is generated by MangoSpot Network Manager library";
         $buffer[] = "#" . date('r');
         $buffer[] = '';
+        if($this->source){
+            $buffer[] = "source ".$this->source;
+            $buffer[] = '';
+        }
         foreach ($this->Adaptors as $adaptor => $detail) {
             if ($detail->auto) $buffer[] = "auto $adaptor";
             foreach ($detail->allows as $item)
@@ -275,12 +422,16 @@ class Interfaces
             $buffer[] = '';
         }
         $imploded = implode("\n", $buffer);
-        if ($return)
+        if ($return){
             return $imploded;
-        return file_put_contents($this->_interfaceFile, $imploded);
-
+        }
+        
+        if($this->sftp){
+            return $this->sftp->put($this->_interfaceFile, $imploded);
+        } else {
+            return file_put_contents($this->_interfaceFile, $imploded);
+        }
     }
-
 
     /**
      * add a new adaptor to Adaptor property
@@ -295,5 +446,4 @@ class Interfaces
             throw new Exception("{$Adaptor->name} already exist is adaptor list");
         $this->Adaptors[$Adaptor->name] = $Adaptor;
     }
-
 }
