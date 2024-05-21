@@ -17,17 +17,45 @@ use Exception;
  * @package NetworkManager
  */
 class Networks {
-	private $ssh;
-    private $sftp;
-    private $ifconfig = TRUE;
-	public function __construct($ssh){
-		$this->ssh = $ssh;
-        $this->sftp = $this->ssh->sftp();
+    /**
+     * @var bool
+     */
+	private $ssh = false;
+    /**
+     * @var bool
+     */
+    private $sftp = false;
+    /**
+     * @var bool
+     */
+    private $ifconfig = true;
+
+    /**
+     * NetworkManager constructor.
+     * @param bool $ifconfig skip command interface ifconfig or net_get_interfaces()
+     * @throws Exception
+     */
+	public function __construct($ifconfig = true){
+        $this->ifconfig = $ifconfig;
 	}
 
+    /**
+     * Remote connetion with SSH and SFTP
+     * @throws Exception
+     */
+    public function ssh($ssh = false){
+        if($ssh){
+		    $this->ssh = $ssh;
+            $this->sftp = $this->ssh->sftp();
+        }
+    }
+
+    // protocol families
 	const PF_INET   = 2;
     const PF_INET6  = 10;
     const PF_PACKET = 17;
+
+    // device/interface flags
     const IFF_UP          = 1 << 0;
     const IFF_BROADCAST   = 1 << 1;
     const IFF_DEBUG       = 1 << 2;
@@ -45,11 +73,13 @@ class Networks {
     const IFF_AUTOMEDIA   = 1 << 14;
     const IFF_DYNAMIC     = 1 << 15;
 
-    public function getIfconfig($ifconfig){
-		$this->ifconfig = $ifconfig;
-	}
-
-    public function getHostAddr(){
+    /**
+     * Get this host's IP address
+     *
+     * @return array
+     */
+    public function getHostAddr()
+    {
         $interfaces = $this->getNetworkInterfaces();
 
         if (is_array($interfaces) && count($ips = $this->filterInterfaces($interfaces))) {
@@ -59,13 +89,27 @@ class Networks {
         return [gethostbyaddr(gethostname())];
     }
 
-    public function getNetworkInterfaces(){
+    /**
+     * Get network interfaces
+     *
+     * @return array|null
+     */
+    public function getNetworkInterfaces()
+    {
         if($this->ifconfig){
-            $rc = $this->ssh->exec('ifconfig');
-            if ($rc === false) {
-                return false;
+            if($this->ssh){
+                $rc = $this->ssh->exec('ifconfig');
+                if ($rc === false) {
+                    return false;
+                }
+                return $this->parseIfconfig($rc);
+            } else {
+                $rc = exec('ifconfig', $output, $resultCode);
+                if ($rc === false) {
+                    return false;
+                }
+                return $this->formatIfconfig($output);
             }
-            return $this->parseIfconfig($rc);
         } else if (version_compare(PHP_VERSION, '7.3') >= 0 && function_exists('net_get_interfaces')) {
             return net_get_interfaces();
         } else {
@@ -73,6 +117,11 @@ class Networks {
         }
     }
 
+    /**
+     * Interface to array
+     *
+     * @param array $output
+     */
     public function arrayInterfaces(){
         $array = array();
         $interfaces = $this->getNetworkInterfaces();
@@ -90,6 +139,11 @@ class Networks {
         return $array;
     }
     
+    /**
+     * IP Address output
+     *
+     * @param array $output
+     */
     private function arrayAddress($data){
         $array = array();
         foreach($data as $value){
@@ -102,6 +156,11 @@ class Networks {
         return $array;
     }
 
+    /**
+     * Filter Interfaces ifconfig output
+     *
+     * @param array $output
+     */
     private function filterInterfaces($interfaces){
         $ips = [];
 
@@ -126,19 +185,35 @@ class Networks {
         return $ips;
     }
 
-    private function parseIfconfig($input){
+    /**
+     * Parse ifconfig output
+     *
+     * @param array $output
+     *
+     * @return array|false
+     */
+    private function parseIfconfig($input)
+    {
         $adapters = preg_split("/\n/s", $input, null);
         return $this->formatIfconfig($adapters);
     }
 
-    private function formatIfconfig($output){
+    /**
+     * Format ifconfig output
+     *
+     * @param array $output
+     *
+     * @return array|false
+     */
+    private function formatIfconfig($output)
+    {
         $interfaces = [];
         $name = null;
         $flags = null;
 
         foreach ($output as $line) {
             if (preg_match('~^([A-Za-z0-9:]+):?[ \t]+(.*)~', $line, $matches)) {
-                $name = $matches[1];
+                $name = rtrim($matches[1], ':');
                 $line = $matches[2];
 
                 $flags = null;
@@ -241,7 +316,11 @@ class Networks {
         return $interfaces;
     }
 
-    private function extractFlags($line){
+    /**
+     * Extract ifconfig output
+     */
+    private function extractFlags($line)
+    {
         static $deviceFlags = [
             'UP'          => self::IFF_UP,
             'BROADCAST'   => self::IFF_BROADCAST,
@@ -278,7 +357,11 @@ class Networks {
         }
     }
 
-    private function prefixLenToNetMask($prefixLen){
+    /**
+     * Prefix Netmask ifconfig output
+     */
+    private function prefixLenToNetMask($prefixLen)
+    {
         $words = [];
 
         for ($i = $prefixLen; $i > 0; $i -= 16) {
