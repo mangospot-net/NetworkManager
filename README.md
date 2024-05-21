@@ -28,6 +28,6 @@ $handle = new Interfaces('/etc/networking/interfaces');
 
 ```
 Paypal: mangospot.net@gmail.com
-Phone: +62 856-4231-1781
+Phone: [+62 856-4231-1781](https://wa.me/6285642311781)
 ```
 [WhatsApp](https://wa.me/6285642311781)
